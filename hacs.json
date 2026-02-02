@@ -1,0 +1,7 @@
+{
+  "name": "Command Runner",
+  "render_readme": true,
+  "domains": ["button"],
+  "iot_class": "Local Polling",
+  "homeassistant": "2023.1.0"
+}

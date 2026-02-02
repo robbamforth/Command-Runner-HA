@@ -1,0 +1,29 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Command Runner Setup",
+        "description": "Connect to your Mac running Command Runner. You must generate an API key in Command Runner Settings first.",
+        "data": {
+          "host": "IP Address",
+          "port": "Port",
+          "api_key": "API Key (Secret)"
+        },
+        "data_description": {
+          "host": "IP address of your Mac (e.g., 192.168.1.100)",
+          "port": "Port number (default: 8080)",
+          "api_key": "API key from Command Runner Settings (required)"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect. Check the IP address and port, and ensure Command Runner is running.",
+      "invalid_auth": "Invalid API key. Please check the key and try again.",
+      "no_api_keys": "Server has no API keys configured. Generate an API key in Command Runner Settings first.",
+      "unknown": "Unexpected error occurred"
+    },
+    "abort": {
+      "already_configured": "This Command Runner instance is already configured"
+    }
+  }
+}
