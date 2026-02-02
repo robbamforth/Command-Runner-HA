@@ -14,7 +14,7 @@ This integration requires API key authentication. The server will reject all req
 
 1. Open HACS → Integrations
 2. Click ⋮ → Custom repositories
-3. Add: `https://github.com/yourusername/command_runner`
+3. Add: `https://github.com/robbamforth/command_runner`
 4. Category: Integration
 5. Find "Command Runner" and click Download
 6. Restart Home Assistant
