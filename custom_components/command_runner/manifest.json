@@ -1,12 +1,14 @@
 {
   "domain": "command_runner",
   "name": "Command Runner",
-  "codeowners": ["@robbamforth"],
+  "codeowners": [
+    "@robbamforth"
+  ],
   "config_flow": true,
   "documentation": "https://github.com/robbamforth/command_runner",
   "integration_type": "hub",
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/robbamforth/command_runner/issues",
   "requirements": [],
-  "version": "2.0.1"
+  "version": "1.1.0"
 }
