@@ -7,6 +7,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.entity import EntityCategory
 
 from . import CommandRunnerCoordinator
 
@@ -43,7 +44,7 @@ class CommandRunnerRefreshButton(CoordinatorEntity, ButtonEntity):
         self._attr_name = "Command Runner Refresh Statistics"
         self._attr_unique_id = f"{entry.entry_id}_refresh"
         self._attr_icon = "mdi:refresh"
-        self._attr_entity_category = "config"
+        self._attr_entity_category = EntityCategory.CONFIG
     
     @property
     def device_info(self):
