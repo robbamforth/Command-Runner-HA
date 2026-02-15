@@ -14,18 +14,22 @@
           "port": "Port number (default: 8080)",
           "api_key": "API key from Command Runner Settings (required)"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure Command Runner",
+        "description": "Update the connection details for Command Runner on {host}",
+        "data": {
+          "host": "IP Address",
+          "port": "Port",
+          "api_key": "API Key (Secret)"
+        },
+        "data_description": {
+          "host": "IP address of your Mac (e.g., 192.168.1.100)",
+          "port": "Port number (default: 8080)",
+          "api_key": "API key from Command Runner Settings"
+        }
       }
     },
-    "reconfigure": {
-            "title": "Reconfigure Command Runner",
-            "description": "Update the connection details for Command Runner on {host}",
-            "data": {
-              "host": "Host IP Address",
-              "port": "Port",
-              "api_key": "API Key"
-            }
-          }
-        },
     "error": {
       "cannot_connect": "Failed to connect. Check the IP address and port, and ensure Command Runner is running.",
       "invalid_auth": "Invalid API key. Please check the key and try again.",
