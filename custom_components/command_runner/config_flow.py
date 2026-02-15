@@ -1,9 +1,12 @@
 """Config flow for Command Runner integration."""
+
 import logging
 from typing import Any
+
 import aiohttp
 import async_timeout
 import voluptuous as vol
+
 from homeassistant import config_entries
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_API_KEY
 from homeassistant.core import HomeAssistant
@@ -13,14 +16,6 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "command_runner"
-
-STEP_USER_DATA_SCHEMA = vol.Schema(
-    {
-        vol.Required(CONF_HOST, default="192.168.1.100"): str,
-        vol.Required(CONF_PORT, default=8080): int,
-        vol.Required(CONF_API_KEY): str,
-    }
-)
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -42,17 +37,14 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
             ) as response:
                 if response.status == 401:
                     raise InvalidAuth("Invalid API key")
-
                 if response.status == 403:
                     raise NoAPIKeys("Server has no API keys configured")
-
                 response.raise_for_status()
                 result = await response.json()
-
                 if not result.get("success"):
                     raise CannotConnect("Server responded but returned error")
 
-                return {"title": f"Command Runner ({host})"}
+        return {"title": f"Command Runner ({host})"}
 
     except aiohttp.ClientError:
         raise CannotConnect("Cannot connect to Command Runner")
@@ -87,11 +79,72 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 await self.async_set_unique_id(f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}")
                 self._abort_if_unique_id_configured()
-
                 return self.async_create_entry(title=info["title"], data=user_input)
 
+        step_user_data_schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default="192.168.1.100"): str,
+                vol.Required(CONF_PORT, default=8080): int,
+                vol.Required(CONF_API_KEY): str,
+            }
+        )
+
         return self.async_show_form(
-            step_id="user", data_schema=STEP_USER_DATA_SCHEMA, errors=errors
+            step_id="user", data_schema=step_user_data_schema, errors=errors
+        )
+
+    async def async_step_reconfigure(
+        self, user_input: dict[str, Any] | None = None
+    ) -> FlowResult:
+        """Handle reconfiguration of the integration."""
+        errors: dict[str, str] = {}
+        
+        # Get the entry being reconfigured
+        entry = self._get_reconfigure_entry()
+
+        if user_input is not None:
+            try:
+                # Validate the new configuration
+                await validate_input(self.hass, user_input)
+            except InvalidAuth:
+                errors["base"] = "invalid_auth"
+            except NoAPIKeys:
+                errors["base"] = "no_api_keys"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected exception")
+                errors["base"] = "unknown"
+            else:
+                # Update the unique_id if host or port changed
+                new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
+                if new_unique_id != entry.unique_id:
+                    await self.async_set_unique_id(new_unique_id)
+                    self._abort_if_unique_id_configured()
+
+                # Update the entry and reload
+                return self.async_update_reload_and_abort(
+                    entry,
+                    data_updates=user_input,
+                    title=f"Command Runner ({user_input[CONF_HOST]})",
+                )
+
+        # Pre-fill the form with current values
+        reconfigure_schema = vol.Schema(
+            {
+                vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
+                vol.Required(CONF_PORT, default=entry.data.get(CONF_PORT, 8080)): int,
+                vol.Required(CONF_API_KEY, default=entry.data.get(CONF_API_KEY, "")): str,
+            }
+        )
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=reconfigure_schema,
+            errors=errors,
+            description_placeholders={
+                "host": entry.data.get(CONF_HOST, ""),
+            },
         )
 
 

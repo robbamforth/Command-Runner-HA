@@ -16,6 +16,16 @@
         }
       }
     },
+    "reconfigure": {
+            "title": "Reconfigure Command Runner",
+            "description": "Update the connection details for Command Runner on {host}",
+            "data": {
+              "host": "Host IP Address",
+              "port": "Port",
+              "api_key": "API Key"
+            }
+          }
+        },
     "error": {
       "cannot_connect": "Failed to connect. Check the IP address and port, and ensure Command Runner is running.",
       "invalid_auth": "Invalid API key. Please check the key and try again.",
