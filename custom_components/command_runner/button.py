@@ -1,5 +1,7 @@
 """Button platform for Command Runner."""
+
 import logging
+
 from homeassistant.components.button import ButtonEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -12,7 +14,6 @@ _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "command_runner"
 
-
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -20,25 +21,30 @@ async def async_setup_entry(
 ) -> None:
     """Set up Command Runner buttons."""
     coordinator: CommandRunnerCoordinator = hass.data[DOMAIN][entry.entry_id]
-
+    
     entities = []
+    
+    # Add refresh button
+    entities.append(CommandRunnerRefreshButton(coordinator, entry))
+    
+    # Add command buttons
     for command in coordinator.data:
         entities.append(CommandRunnerButton(coordinator, command, entry))
-
+    
     async_add_entities(entities)
 
 
-class CommandRunnerButton(CoordinatorEntity, ButtonEntity):
-    """Representation of a Command Runner button."""
-
-    def __init__(self, coordinator: CommandRunnerCoordinator, command: dict, entry: ConfigEntry) -> None:
-        """Initialize the button."""
+class CommandRunnerRefreshButton(CoordinatorEntity, ButtonEntity):
+    """Button to refresh Command Runner statistics."""
+    
+    def __init__(self, coordinator: CommandRunnerCoordinator, entry: ConfigEntry) -> None:
+        """Initialize the refresh button."""
         super().__init__(coordinator)
-        self._command = command
-        self._attr_name = command["name"]
-        self._attr_unique_id = f"{entry.entry_id}_{command['name']}"
-        self._attr_icon = "mdi:play-circle"
-
+        self._attr_name = "Command Runner Refresh Statistics"
+        self._attr_unique_id = f"{entry.entry_id}_refresh"
+        self._attr_icon = "mdi:refresh"
+        self._attr_entity_category = "config"
+    
     @property
     def device_info(self):
         """Return device information about this entity."""
@@ -48,7 +54,34 @@ class CommandRunnerButton(CoordinatorEntity, ButtonEntity):
             "manufacturer": "Command Runner",
             "model": "Mac Command Executor",
         }
+    
+    async def async_press(self) -> None:
+        """Handle the button press to refresh statistics."""
+        _LOGGER.info("Refreshing Command Runner statistics")
+        await self.coordinator.async_request_refresh()
 
+
+class CommandRunnerButton(CoordinatorEntity, ButtonEntity):
+    """Representation of a Command Runner button."""
+    
+    def __init__(self, coordinator: CommandRunnerCoordinator, command: dict, entry: ConfigEntry) -> None:
+        """Initialize the button."""
+        super().__init__(coordinator)
+        self._command = command
+        self._attr_name = command["name"]
+        self._attr_unique_id = f"{entry.entry_id}_{command['name']}"
+        self._attr_icon = "mdi:play-circle"
+    
+    @property
+    def device_info(self):
+        """Return device information about this entity."""
+        return {
+            "identifiers": {(DOMAIN, self.coordinator.host)},
+            "name": f"Command Runner ({self.coordinator.host})",
+            "manufacturer": "Command Runner",
+            "model": "Mac Command Executor",
+        }
+    
     @property
     def extra_state_attributes(self):
         """Return additional attributes."""
@@ -57,12 +90,11 @@ class CommandRunnerButton(CoordinatorEntity, ButtonEntity):
             "allow_parameters": self._command.get("allowParameters", False),
             "voice_trigger": self._command.get("voice", ""),
         }
-
+    
     async def async_press(self) -> None:
         """Handle the button press."""
         _LOGGER.info(f"Executing command: {self._command['name']}")
         result = await self.coordinator.execute_command(self._command["name"])
-
         if result.get("success"):
             _LOGGER.info(f"Command executed successfully: {self._command['name']}")
         else:
