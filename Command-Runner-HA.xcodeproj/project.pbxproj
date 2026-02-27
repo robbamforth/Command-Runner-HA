@@ -1,0 +1,121 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXFileReference section */
+		1230161B2F462EF900C18859 /* en.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = en.json; sourceTree = "<group>"; };
+		1230161D2F462EF900C18859 /* __init__.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = __init__.py; sourceTree = "<group>"; };
+		1230161E2F462EF900C18859 /* button.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = button.py; sourceTree = "<group>"; };
+		1230161F2F462EF900C18859 /* config_flow.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = config_flow.py; sourceTree = "<group>"; };
+		123016202F462EF900C18859 /* manifest.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = manifest.json; sourceTree = "<group>"; };
+		123016212F462EF900C18859 /* sensor.py */ = {isa = PBXFileReference; lastKnownFileType = text.script.python; path = sensor.py; sourceTree = "<group>"; };
+		123016222F462EF900C18859 /* strings.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = strings.json; sourceTree = "<group>"; };
+		123016252F462EF900C18859 /* hacs.json */ = {isa = PBXFileReference; lastKnownFileType = text.json; path = hacs.json; sourceTree = "<group>"; };
+		123016262F462EF900C18859 /* info.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = info.md; sourceTree = "<group>"; };
+		123016272F462EF900C18859 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
+		123016282F462EF900C18859 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXGroup section */
+		123016142F462ED500C18859 = {
+			isa = PBXGroup;
+			children = (
+				123016242F462EF900C18859 /* custom_components */,
+				123016252F462EF900C18859 /* hacs.json */,
+				123016262F462EF900C18859 /* info.md */,
+				123016272F462EF900C18859 /* LICENSE */,
+				123016282F462EF900C18859 /* README.md */,
+			);
+			sourceTree = "<group>";
+		};
+		1230161C2F462EF900C18859 /* translations */ = {
+			isa = PBXGroup;
+			children = (
+				1230161B2F462EF900C18859 /* en.json */,
+			);
+			path = translations;
+			sourceTree = "<group>";
+		};
+		123016232F462EF900C18859 /* command_runner */ = {
+			isa = PBXGroup;
+			children = (
+				1230161C2F462EF900C18859 /* translations */,
+				1230161D2F462EF900C18859 /* __init__.py */,
+				1230161E2F462EF900C18859 /* button.py */,
+				1230161F2F462EF900C18859 /* config_flow.py */,
+				123016202F462EF900C18859 /* manifest.json */,
+				123016212F462EF900C18859 /* sensor.py */,
+				123016222F462EF900C18859 /* strings.json */,
+			);
+			path = command_runner;
+			sourceTree = "<group>";
+		};
+		123016242F462EF900C18859 /* custom_components */ = {
+			isa = PBXGroup;
+			children = (
+				123016232F462EF900C18859 /* command_runner */,
+			);
+			path = custom_components;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXProject section */
+		123016152F462ED500C18859 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastUpgradeCheck = 2620;
+			};
+			buildConfigurationList = 123016182F462ED500C18859 /* Build configuration list for PBXProject "Command-Runner-HA" */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 123016142F462ED500C18859;
+			minimizedProjectReferenceProxies = 1;
+			preferredProjectObjectVersion = 77;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+			);
+		};
+/* End PBXProject section */
+
+/* Begin XCBuildConfiguration section */
+		123016192F462ED500C18859 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = 8AKLWEAXD4;
+			};
+			name = Debug;
+		};
+		1230161A2F462ED500C18859 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				DEVELOPMENT_TEAM = 8AKLWEAXD4;
+			};
+			name = Release;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		123016182F462ED500C18859 /* Build configuration list for PBXProject "Command-Runner-HA" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				123016192F462ED500C18859 /* Debug */,
+				1230161A2F462ED500C18859 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+	};
+	rootObject = 123016152F462ED500C18859 /* Project object */;
+}

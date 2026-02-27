@@ -1,5 +1,5 @@
 {
-  "domain": "command-runner-ha",
+  "domain": "command_runner",
   "name": "Command Runner",
   "codeowners": [
     "@robbamforth"
