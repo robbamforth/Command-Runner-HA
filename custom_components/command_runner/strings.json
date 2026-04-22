@@ -7,12 +7,16 @@
         "data": {
           "host": "IP Address",
           "port": "Port",
-          "api_key": "API Key (Secret)"
+          "api_key": "API Key (Secret)",
+          "automatic_sensor_refresh": "Enable automatic sensor refresh",
+          "sensor_refresh_interval": "Sensor refresh interval (seconds)"
         },
         "data_description": {
           "host": "IP address of your Mac (e.g., 192.168.1.100)",
           "port": "Port number (default: 8080)",
-          "api_key": "API key from Command Runner Settings (required)"
+          "api_key": "API key from Command Runner Settings (required)",
+          "automatic_sensor_refresh": "Automatically refresh Command Runner sensor data",
+          "sensor_refresh_interval": "How often to refresh sensor data in seconds"
         }
       },
       "reconfigure": {
@@ -21,12 +25,16 @@
         "data": {
           "host": "IP Address",
           "port": "Port",
-          "api_key": "API Key (Secret)"
+          "api_key": "API Key (Secret)",
+          "automatic_sensor_refresh": "Enable automatic sensor refresh",
+          "sensor_refresh_interval": "Sensor refresh interval (seconds)"
         },
         "data_description": {
           "host": "IP address of your Mac (e.g., 192.168.1.100)",
           "port": "Port number (default: 8080)",
-          "api_key": "API key from Command Runner Settings"
+          "api_key": "API key from Command Runner Settings",
+          "automatic_sensor_refresh": "Automatically refresh Command Runner sensor data",
+          "sensor_refresh_interval": "How often to refresh sensor data in seconds"
         }
       }
     },

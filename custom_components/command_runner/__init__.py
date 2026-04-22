@@ -7,7 +7,7 @@ import aiohttp
 import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_HOST, CONF_PORT, CONF_API_KEY, Platform
+from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT, Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -18,6 +18,11 @@ DOMAIN = "command_runner"
 
 PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
 
+CONF_AUTO_SENSOR_REFRESH = "automatic_sensor_refresh"
+CONF_SENSOR_REFRESH_INTERVAL = "sensor_refresh_interval"
+
+DEFAULT_AUTO_SENSOR_REFRESH = True
+DEFAULT_SENSOR_REFRESH_INTERVAL = 30
 SCAN_INTERVAL = timedelta(seconds=30)
 
 
@@ -26,8 +31,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     api_key = entry.data.get(CONF_API_KEY, "")
+    auto_sensor_refresh = entry.data.get(
+        CONF_AUTO_SENSOR_REFRESH, DEFAULT_AUTO_SENSOR_REFRESH
+    )
+    sensor_refresh_interval = entry.data.get(
+        CONF_SENSOR_REFRESH_INTERVAL, DEFAULT_SENSOR_REFRESH_INTERVAL
+    )
 
-    coordinator = CommandRunnerCoordinator(hass, host, port, api_key)
+    coordinator = CommandRunnerCoordinator(
+        hass,
+        host,
+        port,
+        api_key,
+        auto_sensor_refresh,
+        sensor_refresh_interval,
+    )
     await coordinator.async_config_entry_first_refresh()
 
     hass.data.setdefault(DOMAIN, {})
@@ -49,7 +67,15 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 class CommandRunnerCoordinator(DataUpdateCoordinator):
     """Class to manage fetching Command Runner data."""
 
-    def __init__(self, hass: HomeAssistant, host: str, port: int, api_key: str) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        host: str,
+        port: int,
+        api_key: str,
+        auto_sensor_refresh: bool,
+        sensor_refresh_interval: int,
+    ) -> None:
         """Initialize."""
         self.hass = hass
         self.host = host
@@ -65,11 +91,15 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
             "exit_code": None,
         }
 
+        update_interval = None
+        if auto_sensor_refresh:
+            update_interval = timedelta(seconds=max(1, int(sensor_refresh_interval)))
+
         super().__init__(
             hass,
             _LOGGER,
             name=DOMAIN,
-            update_interval=SCAN_INTERVAL,
+            update_interval=update_interval,
         )
 
     def _get_headers(self) -> dict:
@@ -82,7 +112,6 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         """Fetch command list and status data from API."""
         session = async_get_clientsession(self.hass)
 
-        # Fetch commands list
         commands: list[dict] = []
 
         try:
@@ -108,10 +137,9 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
 
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
-        except Exception as err:  # pylint: disable=broad-except
+        except Exception as err:
             raise UpdateFailed(f"Unexpected error: {err}") from err
 
-        # Fetch status data
         try:
             async with async_timeout.timeout(10):
                 async with session.get(
@@ -128,7 +156,8 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                         _LOGGER.warning(
                             "Status endpoint returned %s", response.status
                         )
-        except Exception as err:  # pylint: disable=broad-except
+
+        except Exception as err:
             _LOGGER.warning("Error fetching status data: %s", err)
 
         return commands
@@ -159,7 +188,6 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                         response.raise_for_status()
                         result = await response.json()
 
-            # Store last execution details
             self.last_execution = {
                 "command_name": command_name,
                 "status": "Success" if result.get("success") else "Failed",
@@ -170,7 +198,6 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                 "exit_code": result.get("exitCode") if result.get("success") else None,
             }
 
-            # Trigger update for sensors that depend on last_execution
             self.async_set_updated_data(self.data)
 
             return result
@@ -187,7 +214,7 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(self.data)
             return {"success": False, "error": str(err)}
 
-        except Exception as err:  # pylint: disable=broad-except
+        except Exception as err:
             _LOGGER.error("Unexpected error executing command: %s", err)
             self.last_execution = {
                 "command_name": command_name,
@@ -229,6 +256,6 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         except aiohttp.ClientError as err:
             _LOGGER.error("Error fetching sensor output: %s", err)
             return {"success": False, "error": str(err)}
-        except Exception as err:  # pylint: disable=broad-except
+        except Exception as err:
             _LOGGER.error("Unexpected error fetching sensor output: %s", err)
             return {"success": False, "error": str(err)}

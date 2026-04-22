@@ -1,5 +1,6 @@
 """Config flow for Command Runner integration."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -8,17 +9,50 @@ import async_timeout
 import voluptuous as vol
 
 from homeassistant import config_entries
-from homeassistant.const import CONF_HOST, CONF_PORT, CONF_API_KEY
+from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
+
+from . import (
+    CONF_AUTO_SENSOR_REFRESH,
+    CONF_SENSOR_REFRESH_INTERVAL,
+    DEFAULT_AUTO_SENSOR_REFRESH,
+    DEFAULT_SENSOR_REFRESH_INTERVAL,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "command_runner"
 
-# Options
 CONF_SHOW_NOTIFICATIONS = "show_notifications"
+
+
+def _build_config_schema(defaults: dict[str, Any]) -> vol.Schema:
+    """Build config schema with conditional refresh interval field."""
+    auto_refresh = defaults.get(
+        CONF_AUTO_SENSOR_REFRESH, DEFAULT_AUTO_SENSOR_REFRESH
+    )
+
+    schema: dict[Any, Any] = {
+        vol.Required(CONF_HOST, default=defaults.get(CONF_HOST, "192.168.1.100")): str,
+        vol.Required(CONF_PORT, default=defaults.get(CONF_PORT, 8080)): int,
+        vol.Required(CONF_API_KEY, default=defaults.get(CONF_API_KEY, "")): str,
+        vol.Required(CONF_AUTO_SENSOR_REFRESH, default=auto_refresh): bool,
+    }
+
+    if auto_refresh:
+        schema[
+            vol.Required(
+                CONF_SENSOR_REFRESH_INTERVAL,
+                default=defaults.get(
+                    CONF_SENSOR_REFRESH_INTERVAL,
+                    DEFAULT_SENSOR_REFRESH_INTERVAL,
+                ),
+            )
+        ] = vol.All(vol.Coerce(int), vol.Range(min=1))
+
+    return vol.Schema(schema)
 
 
 async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
@@ -36,7 +70,7 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         async with async_timeout.timeout(10):
             async with session.get(
                 f"http://{host}:{port}/commands",
-                headers=headers
+                headers=headers,
             ) as response:
                 if response.status == 401:
                     raise InvalidAuth("Invalid API key")
@@ -47,13 +81,17 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
                 if not result.get("success"):
                     raise CannotConnect("Server responded but returned error")
 
-        return {"title": f"Command Runner ({host})"}
+                return {"title": f"Command Runner ({host})"}
 
-    except aiohttp.ClientError:
-        raise CannotConnect("Cannot connect to Command Runner")
+    except aiohttp.ClientError as err:
+        raise CannotConnect("Cannot connect to Command Runner") from err
+    except asyncio.TimeoutError as err:
+        raise CannotConnect("Connection timed out") from err
+    except asyncio.CancelledError as err:
+        raise CannotConnect("Connection timed out") from err
     except Exception as err:
         _LOGGER.exception("Unexpected exception")
-        raise CannotConnect(f"Unknown error: {err}")
+        raise CannotConnect(f"Unknown error: {err}") from err
 
 
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -74,8 +112,16 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle the initial step."""
         errors: dict[str, str] = {}
+        defaults = {
+            CONF_HOST: "192.168.1.100",
+            CONF_PORT: 8080,
+            CONF_API_KEY: "",
+            CONF_AUTO_SENSOR_REFRESH: DEFAULT_AUTO_SENSOR_REFRESH,
+            CONF_SENSOR_REFRESH_INTERVAL: DEFAULT_SENSOR_REFRESH_INTERVAL,
+        }
 
         if user_input is not None:
+            defaults.update(user_input)
             try:
                 info = await validate_input(self.hass, user_input)
             except InvalidAuth:
@@ -84,24 +130,29 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "no_api_keys"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                await self.async_set_unique_id(f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}")
+                if not user_input.get(
+                    CONF_AUTO_SENSOR_REFRESH, DEFAULT_AUTO_SENSOR_REFRESH
+                ):
+                    user_input.pop(CONF_SENSOR_REFRESH_INTERVAL, None)
+                elif CONF_SENSOR_REFRESH_INTERVAL not in user_input:
+                    user_input[CONF_SENSOR_REFRESH_INTERVAL] = (
+                        DEFAULT_SENSOR_REFRESH_INTERVAL
+                    )
+
+                await self.async_set_unique_id(
+                    f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
+                )
                 self._abort_if_unique_id_configured()
                 return self.async_create_entry(title=info["title"], data=user_input)
 
-        step_user_data_schema = vol.Schema(
-            {
-                vol.Required(CONF_HOST, default="192.168.1.100"): str,
-                vol.Required(CONF_PORT, default=8080): int,
-                vol.Required(CONF_API_KEY): str,
-            }
-        )
-
         return self.async_show_form(
-            step_id="user", data_schema=step_user_data_schema, errors=errors
+            step_id="user",
+            data_schema=_build_config_schema(defaults),
+            errors=errors,
         )
 
     async def async_step_reconfigure(
@@ -109,13 +160,24 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     ) -> FlowResult:
         """Handle reconfiguration of the integration."""
         errors: dict[str, str] = {}
-        
-        # Get the entry being reconfigured
         entry = self._get_reconfigure_entry()
 
+        defaults = {
+            CONF_HOST: entry.data.get(CONF_HOST, ""),
+            CONF_PORT: entry.data.get(CONF_PORT, 8080),
+            CONF_API_KEY: entry.data.get(CONF_API_KEY, ""),
+            CONF_AUTO_SENSOR_REFRESH: entry.data.get(
+                CONF_AUTO_SENSOR_REFRESH, DEFAULT_AUTO_SENSOR_REFRESH
+            ),
+            CONF_SENSOR_REFRESH_INTERVAL: entry.data.get(
+                CONF_SENSOR_REFRESH_INTERVAL,
+                DEFAULT_SENSOR_REFRESH_INTERVAL,
+            ),
+        }
+
         if user_input is not None:
+            defaults.update(user_input)
             try:
-                # Validate the new configuration
                 await validate_input(self.hass, user_input)
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
@@ -123,35 +185,33 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 errors["base"] = "no_api_keys"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except Exception:  # pylint: disable=broad-except
+            except Exception:
                 _LOGGER.exception("Unexpected exception")
                 errors["base"] = "unknown"
             else:
-                # Update the unique_id if host or port changed
+                if not user_input.get(
+                    CONF_AUTO_SENSOR_REFRESH, DEFAULT_AUTO_SENSOR_REFRESH
+                ):
+                    user_input.pop(CONF_SENSOR_REFRESH_INTERVAL, None)
+                elif CONF_SENSOR_REFRESH_INTERVAL not in user_input:
+                    user_input[CONF_SENSOR_REFRESH_INTERVAL] = (
+                        DEFAULT_SENSOR_REFRESH_INTERVAL
+                    )
+
                 new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
                 if new_unique_id != entry.unique_id:
                     await self.async_set_unique_id(new_unique_id)
                     self._abort_if_unique_id_configured()
 
-                # Update the entry and reload
                 return self.async_update_reload_and_abort(
                     entry,
                     data_updates=user_input,
                     title=f"Command Runner ({user_input[CONF_HOST]})",
                 )
 
-        # Pre-fill the form with current values
-        reconfigure_schema = vol.Schema(
-            {
-                vol.Required(CONF_HOST, default=entry.data.get(CONF_HOST, "")): str,
-                vol.Required(CONF_PORT, default=entry.data.get(CONF_PORT, 8080)): int,
-                vol.Required(CONF_API_KEY, default=entry.data.get(CONF_API_KEY, "")): str,
-            }
-        )
-
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=reconfigure_schema,
+            data_schema=_build_config_schema(defaults),
             errors=errors,
             description_placeholders={
                 "host": entry.data.get(CONF_HOST, ""),
@@ -173,7 +233,9 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
             {
                 vol.Optional(
                     CONF_SHOW_NOTIFICATIONS,
-                    default=self.config_entry.options.get(CONF_SHOW_NOTIFICATIONS, True),
+                    default=self.config_entry.options.get(
+                        CONF_SHOW_NOTIFICATIONS, True
+                    ),
                 ): bool,
             }
         )
