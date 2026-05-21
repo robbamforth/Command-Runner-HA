@@ -234,7 +234,7 @@ class OptionsFlowHandler(config_entries.OptionsFlow):
                 vol.Optional(
                     CONF_SHOW_NOTIFICATIONS,
                     default=self.config_entry.options.get(
-                        CONF_SHOW_NOTIFICATIONS, True
+                        CONF_SHOW_NOTIFICATIONS, False
                     ),
                 ): bool,
             }

@@ -174,7 +174,7 @@ class CommandRunnerRefreshButton(CoordinatorEntity, ButtonEntity):
             except Exception as err:  # noqa: BLE001 - HA service failures should be logged only.
                 _LOGGER.error("Failed to refresh %s: %s", entity_id, err)
 
-        show_notifications = self._entry.options.get(CONF_SHOW_NOTIFICATIONS, True)
+        show_notifications = self._entry.options.get(CONF_SHOW_NOTIFICATIONS, False)
         if show_notifications:
             await self.hass.services.async_call(
                 "persistent_notification",
@@ -242,7 +242,7 @@ class CommandRunnerButton(CoordinatorEntity, ButtonEntity):
 
         result = await self.coordinator.execute_command(command_id_value, command_name)
 
-        show_notifications = self._entry.options.get(CONF_SHOW_NOTIFICATIONS, True)
+        show_notifications = self._entry.options.get(CONF_SHOW_NOTIFICATIONS, False)
 
         if result.get("success"):
             _LOGGER.info("Command executed successfully: %s", command_name)
