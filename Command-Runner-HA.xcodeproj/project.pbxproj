@@ -18,6 +18,7 @@
 		123016262F462EF900C18859 /* info.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = info.md; sourceTree = "<group>"; };
 		123016272F462EF900C18859 /* LICENSE */ = {isa = PBXFileReference; lastKnownFileType = text; path = LICENSE; sourceTree = "<group>"; };
 		123016282F462EF900C18859 /* README.md */ = {isa = PBXFileReference; lastKnownFileType = net.daringfireball.markdown; path = README.md; sourceTree = "<group>"; };
+		12AC4F2F2FBF663400B513CF /* icon.png */ = {isa = PBXFileReference; lastKnownFileType = image.png; path = icon.png; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -50,6 +51,7 @@
 				123016202F462EF900C18859 /* manifest.json */,
 				123016212F462EF900C18859 /* sensor.py */,
 				123016222F462EF900C18859 /* strings.json */,
+				12AC4F2F2FBF663400B513CF /* icon.png */,
 			);
 			path = command_runner;
 			sourceTree = "<group>";
