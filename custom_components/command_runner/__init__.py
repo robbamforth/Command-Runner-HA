@@ -2,6 +2,7 @@
 
 import logging
 from datetime import timedelta
+from urllib.parse import quote, urlencode
 
 import aiohttp
 import async_timeout
@@ -24,6 +25,14 @@ CONF_SENSOR_REFRESH_INTERVAL = "sensor_refresh_interval"
 DEFAULT_AUTO_SENSOR_REFRESH = True
 DEFAULT_SENSOR_REFRESH_INTERVAL = 30
 SCAN_INTERVAL = timedelta(seconds=30)
+
+
+def command_id(command: dict) -> str | None:
+    """Return the stable command UUID supplied by the Mac app."""
+    value = command.get("id")
+    if value is None:
+        return None
+    return str(value)
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -84,6 +93,7 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         self.base_url = f"http://{host}:{port}"
         self.status_data: dict = {}
         self.last_execution: dict = {
+            "command_id": None,
             "command_name": None,
             "status": None,
             "output": None,
@@ -131,7 +141,14 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                     data = await response.json()
 
                     if data.get("success"):
-                        commands = data.get("commands", [])
+                        raw_commands = data.get("commands", [])
+                        commands = [cmd for cmd in raw_commands if command_id(cmd)]
+                        skipped = len(raw_commands) - len(commands)
+                        if skipped:
+                            _LOGGER.warning(
+                                "Skipped %d Command Runner command(s) without stable id",
+                                skipped,
+                            )
                     else:
                         raise UpdateFailed("Failed to fetch commands")
 
@@ -162,14 +179,19 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
 
         return commands
 
-    async def execute_command(self, command_name: str, parameters: str | None = None):
-        """Execute a command on the Mac."""
+    async def execute_command(
+        self,
+        command_id_value: str,
+        command_name: str | None = None,
+        parameters: str | None = None,
+    ):
+        """Execute a command on the Mac by stable command UUID."""
         session = async_get_clientsession(self.hass)
 
         try:
-            url = f"{self.base_url}/run/{command_name}"
+            url = f"{self.base_url}/run/{quote(command_id_value, safe='')}"
             if parameters:
-                url += f"?params={parameters}"
+                url += f"?{urlencode({'params': parameters})}"
 
             async with async_timeout.timeout(30):
                 async with session.get(
@@ -189,7 +211,8 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                         result = await response.json()
 
             self.last_execution = {
-                "command_name": command_name,
+                "command_id": command_id_value,
+                "command_name": command_name or result.get("command") or command_id_value,
                 "status": "Success" if result.get("success") else "Failed",
                 "output": result.get("output", "").strip()
                 if result.get("success")
@@ -205,7 +228,8 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         except aiohttp.ClientError as err:
             _LOGGER.error("Error executing command: %s", err)
             self.last_execution = {
-                "command_name": command_name,
+                "command_id": command_id_value,
+                "command_name": command_name or command_id_value,
                 "status": "Failed",
                 "output": None,
                 "error": str(err),
@@ -217,7 +241,8 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("Unexpected error executing command: %s", err)
             self.last_execution = {
-                "command_name": command_name,
+                "command_id": command_id_value,
+                "command_name": command_name or command_id_value,
                 "status": "Failed",
                 "output": None,
                 "error": str(err),
@@ -226,12 +251,12 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
             self.async_set_updated_data(self.data)
             return {"success": False, "error": str(err)}
 
-    async def async_get_sensor_output(self, command_name: str) -> dict:
-        """Get output for a sensor-type command from the Mac."""
+    async def async_get_sensor_output(self, command_id_value: str) -> dict:
+        """Get output for a sensor-type command from the Mac by stable UUID."""
         session = async_get_clientsession(self.hass)
 
         try:
-            url = f"{self.base_url}/sensor/{command_name}"
+            url = f"{self.base_url}/sensor/{quote(command_id_value, safe='')}"
 
             async with async_timeout.timeout(30):
                 async with session.get(
@@ -259,3 +284,4 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("Unexpected error fetching sensor output: %s", err)
             return {"success": False, "error": str(err)}
+

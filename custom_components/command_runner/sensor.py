@@ -1,19 +1,42 @@
 """Sensor platform for Command Runner."""
 
+from __future__ import annotations
+
 import logging
 from datetime import datetime, timezone
 
-from homeassistant.components.sensor import SensorEntity, SensorDeviceClass
+from homeassistant.components.sensor import SensorDeviceClass, SensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from . import CommandRunnerCoordinator
+from . import CommandRunnerCoordinator, command_id
 
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "command_runner"
+
+FIXED_SENSOR_SUFFIXES = {
+    "status",
+    "version",
+    "port",
+    "uptime",
+    "total_requests",
+    "requests_processing",
+    "api_keys_configured",
+    "last_request",
+    "last_command_name",
+    "last_command_status",
+    "last_command_output",
+}
+
+
+def _command_sensor_unique_id(entry: ConfigEntry, command: dict) -> str:
+    """Return the unique ID for a command-backed sensor."""
+    return f"{entry.entry_id}_sensor_{command_id(command)}"
+
 
 
 async def async_setup_entry(
@@ -24,31 +47,109 @@ async def async_setup_entry(
     """Set up Command Runner sensors."""
     coordinator: CommandRunnerCoordinator = hass.data[DOMAIN][entry.entry_id]
 
-    entities = [
-        CommandRunnerStatusSensor(coordinator, entry),
-        CommandRunnerVersionSensor(coordinator, entry),
-        CommandRunnerPortSensor(coordinator, entry),
-        CommandRunnerUptimeSensor(coordinator, entry),
-        CommandRunnerTotalRequestsSensor(coordinator, entry),
-        CommandRunnerProcessingSensor(coordinator, entry),
-        CommandRunnerAPIKeysSensor(coordinator, entry),
-        CommandRunnerLastRequestSensor(coordinator, entry),
-        # Last execution sensors
-        CommandRunnerLastCommandNameSensor(coordinator, entry),
-        CommandRunnerLastCommandStatusSensor(coordinator, entry),
-        CommandRunnerLastCommandOutputSensor(coordinator, entry),
-    ]
+    manager = CommandRunnerSensorManager(hass, entry, coordinator, async_add_entities)
+    manager.async_setup()
+    entry.async_on_unload(coordinator.async_add_listener(manager.async_reconcile))
 
-    # Add sensors for commands that are marked as kind == "sensor"
-    for command in coordinator.data:
-        if command.get("kind") == "sensor":
-            entities.append(CommandRunnerCommandSensor(coordinator, command, entry))
 
-    #async_add_entities(entities)
-    _LOGGER.debug("Creating %d sensor entities (%d command sensors)",
-                  len(entities),
-                  sum(1 for e in entities if isinstance(e, CommandRunnerCommandSensor)))
-    async_add_entities(entities, update_before_add=True)
+class CommandRunnerSensorManager:
+    """Keep command sensor entities in sync with the Mac command list."""
+
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entry: ConfigEntry,
+        coordinator: CommandRunnerCoordinator,
+        async_add_entities: AddEntitiesCallback,
+    ) -> None:
+        self.hass = hass
+        self.entry = entry
+        self.coordinator = coordinator
+        self.async_add_entities = async_add_entities
+        self.entities: dict[str, CommandRunnerCommandSensor] = {}
+        self._fixed_added = False
+
+    def async_setup(self) -> None:
+        """Create initial entities."""
+        entities: list[SensorEntity] = []
+
+        if not self._fixed_added:
+            entities.extend(
+                [
+                    CommandRunnerStatusSensor(self.coordinator, self.entry),
+                    CommandRunnerVersionSensor(self.coordinator, self.entry),
+                    CommandRunnerPortSensor(self.coordinator, self.entry),
+                    CommandRunnerUptimeSensor(self.coordinator, self.entry),
+                    CommandRunnerTotalRequestsSensor(self.coordinator, self.entry),
+                    CommandRunnerProcessingSensor(self.coordinator, self.entry),
+                    CommandRunnerAPIKeysSensor(self.coordinator, self.entry),
+                    CommandRunnerLastRequestSensor(self.coordinator, self.entry),
+                    CommandRunnerLastCommandNameSensor(self.coordinator, self.entry),
+                    CommandRunnerLastCommandStatusSensor(self.coordinator, self.entry),
+                    CommandRunnerLastCommandOutputSensor(self.coordinator, self.entry),
+                ]
+            )
+            self._fixed_added = True
+
+        entities.extend(self._new_command_entities())
+        self._remove_orphaned_registry_entries()
+        _LOGGER.debug(
+            "Creating %d sensor entities (%d command sensors)",
+            len(entities),
+            sum(isinstance(e, CommandRunnerCommandSensor) for e in entities),
+        )
+        self.async_add_entities(entities, update_before_add=True)
+
+    @callback
+    def async_reconcile(self) -> None:
+        """Add, update, and remove entities after each coordinator refresh."""
+        entities = self._new_command_entities()
+        self._remove_orphaned_registry_entries()
+
+        if entities:
+            _LOGGER.debug("Adding %d new Command Runner sensor entities", len(entities))
+            self.async_add_entities(entities, update_before_add=True)
+
+    def _command_sensors(self) -> list[dict]:
+        return [
+            command
+            for command in (self.coordinator.data or [])
+            if command.get("kind") == "sensor"
+        ]
+
+    def _new_command_entities(self) -> list["CommandRunnerCommandSensor"]:
+        entities: list[CommandRunnerCommandSensor] = []
+
+        for command in self._command_sensors():
+            unique_id = _command_sensor_unique_id(self.entry, command)
+            if unique_id in self.entities:
+                self.entities[unique_id].update_command(command)
+                continue
+
+            entity = CommandRunnerCommandSensor(self.coordinator, command, self.entry)
+            self.entities[unique_id] = entity
+            entities.append(entity)
+
+        return entities
+
+    def _remove_orphaned_registry_entries(self) -> None:
+        registry = er.async_get(self.hass)
+        valid_unique_ids = {
+            f"{self.entry.entry_id}_{suffix}" for suffix in FIXED_SENSOR_SUFFIXES
+        }
+        valid_unique_ids.update(
+            _command_sensor_unique_id(self.entry, command)
+            for command in self._command_sensors()
+        )
+
+        for entity in er.async_entries_for_config_entry(registry, self.entry.entry_id):
+            if entity.domain != "sensor" or entity.unique_id is None:
+                continue
+            if entity.unique_id in valid_unique_ids:
+                continue
+            if entity.unique_id.startswith(f"{self.entry.entry_id}_sensor_") and entity.unique_id not in valid_unique_ids:
+                _LOGGER.info("Removing orphaned Command Runner sensor entity: %s", entity.entity_id)
+                registry.async_remove(entity.entity_id)
 
 
 class CommandRunnerStatusSensor(CoordinatorEntity, SensorEntity):
@@ -354,15 +455,12 @@ class CommandRunnerLastCommandOutputSensor(CoordinatorEntity, SensorEntity):
     def native_value(self):
         last_exec = self.coordinator.last_execution
 
-        # If success, return output
         if last_exec.get("status") == "Success":
             output = last_exec.get("output")
             if output:
-                # Truncate if too long (state limit is 255 chars)
                 return output[:255] if len(output) > 255 else output
             return "No output"
 
-        # If failed, return error message
         if last_exec.get("status") == "Failed":
             error = last_exec.get("error")
             if error:
@@ -380,7 +478,6 @@ class CommandRunnerLastCommandOutputSensor(CoordinatorEntity, SensorEntity):
         if last_exec.get("exit_code") is not None:
             attrs["exit_code"] = last_exec.get("exit_code")
 
-        # Store full output/error in attributes if it was truncated
         if last_exec.get("status") == "Success":
             full_output = last_exec.get("output")
             if full_output and len(full_output) > 255:
@@ -394,7 +491,7 @@ class CommandRunnerLastCommandOutputSensor(CoordinatorEntity, SensorEntity):
 
 
 class CommandRunnerCommandSensor(SensorEntity):
-    """Standalone sensor for command output (not coordinator-driven)."""
+    """Standalone sensor for command output."""
 
     _attr_icon = "mdi:console"
     _attr_should_poll = True
@@ -408,10 +505,8 @@ class CommandRunnerCommandSensor(SensorEntity):
         """Initialize the command sensor."""
         self._coordinator = coordinator
         self._entry = entry
-        self._command = command
-        self._command_name: str = command["name"]  # "Uptime2"
-        self._attr_name = f"Command Runner {self._command_name}"
-        self._attr_unique_id = f"{entry.entry_id}_sensor_{self._command_name}"
+        self.update_command(command, write_state=False)
+        self._attr_unique_id = _command_sensor_unique_id(entry, command)
 
     @property
     def device_info(self):
@@ -422,18 +517,32 @@ class CommandRunnerCommandSensor(SensorEntity):
             "model": "Mac Command Executor",
         }
 
+    def update_command(self, command: dict, write_state: bool = True) -> None:
+        """Update command metadata when it changes on the Mac."""
+        self._command = command
+        self._command_id: str | None = command_id(command)
+        self._command_name: str = command["name"]
+        self._attr_name = f"Command Runner {self._command_name}"
+        if write_state and self.hass is not None:
+            self.async_write_ha_state()
+
     @property
     def extra_state_attributes(self):
         return {
-            "command": self._command.get("name"),  # "Uptime2"
-            "raw_command": self._command.get("command"),  # "uptime"
+            "command_id": command_id(self._command),
+            "command": self._command.get("name"),
+            "raw_command": self._command.get("command"),
             "voice_trigger": self._command.get("voice", ""),
         }
 
     async def async_update(self) -> None:
         """Fetch latest value from Command Runner."""
         _LOGGER.debug("Polling sensor %s", self._command_name)
-        result = await self._coordinator.async_get_sensor_output(self._command_name)
+        if self._command_id is None:
+            _LOGGER.error("Cannot poll sensor without stable id: %s", self._command_name)
+            return
+
+        result = await self._coordinator.async_get_sensor_output(self._command_id)
 
         _LOGGER.debug("Command sensor %s got result: %s", self._command_name, result)
 
