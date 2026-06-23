@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Command Runner Setup",
-        "description": "Connect to your Mac running Command Runner. You must generate an API key in Command Runner Settings first.",
+        "description": "Connect to your Mac running Command Runner. After submitting, approve Home Assistant in Command Runner Settings > Connected Devices.",
         "data": {
           "host": "IP Address",
           "port": "Port",

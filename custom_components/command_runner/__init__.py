@@ -3,12 +3,19 @@
 import logging
 from datetime import timedelta
 from urllib.parse import quote, urlencode
+from uuid import uuid4
 
 import aiohttp
 import async_timeout
 
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CONF_API_KEY, CONF_HOST, CONF_PORT, Platform
+from homeassistant.const import (
+    CONF_API_KEY,
+    CONF_HOST,
+    CONF_PORT,
+    Platform,
+    __version__ as HA_VERSION,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
@@ -21,10 +28,41 @@ PLATFORMS = [Platform.BUTTON, Platform.SENSOR]
 
 CONF_AUTO_SENSOR_REFRESH = "automatic_sensor_refresh"
 CONF_SENSOR_REFRESH_INTERVAL = "sensor_refresh_interval"
+CONF_DEVICE_ID = "device_id"
+
+INTEGRATION_VERSION = "1.2.0"
 
 DEFAULT_AUTO_SENSOR_REFRESH = True
 DEFAULT_SENSOR_REFRESH_INTERVAL = 120
 SCAN_INTERVAL = timedelta(seconds=30)
+
+
+def _header_safe(value: str) -> str:
+    """Return an ASCII-safe HTTP header value understood by Command Runner."""
+    return quote(str(value), safe="-._~")
+
+
+def device_headers(
+    hass: HomeAssistant,
+    api_key: str,
+    device_id: str,
+    *,
+    approval_request: bool = False,
+) -> dict[str, str]:
+    """Build API-key and stable trusted-device headers."""
+    location_name = hass.config.location_name or "Home Assistant"
+    headers = {
+        "X-API-Key": api_key,
+        "X-Device-ID": _header_safe(device_id),
+        "X-Device-Name": _header_safe(f"Home Assistant - {location_name}"),
+        "X-Device-Model": _header_safe("Home Assistant Integration"),
+        "X-Device-System": _header_safe("Home Assistant"),
+        "X-Device-System-Version": _header_safe(HA_VERSION),
+        "X-App-Version": _header_safe(INTEGRATION_VERSION),
+    }
+    if approval_request:
+        headers["X-Device-Approval-Request"] = "true"
+    return headers
 
 
 def command_id(command: dict) -> str | None:
@@ -40,6 +78,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     host = entry.data[CONF_HOST]
     port = entry.data[CONF_PORT]
     api_key = entry.data.get(CONF_API_KEY, "")
+    device_id = entry.data[CONF_DEVICE_ID]
     auto_sensor_refresh = entry.data.get(
         CONF_AUTO_SENSOR_REFRESH, DEFAULT_AUTO_SENSOR_REFRESH
     )
@@ -52,6 +91,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         host,
         port,
         api_key,
+        device_id,
         auto_sensor_refresh,
         sensor_refresh_interval,
     )
@@ -61,6 +101,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     hass.data[DOMAIN][entry.entry_id] = coordinator
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+
+    return True
+
+
+async def async_migrate_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Add one persistent trusted-device ID to existing config entries."""
+    if entry.version < 2:
+        data = dict(entry.data)
+        data.setdefault(CONF_DEVICE_ID, str(uuid4()))
+        hass.config_entries.async_update_entry(entry, data=data, version=2)
+        _LOGGER.info("Migrated Command Runner entry to trusted-device authentication")
 
     return True
 
@@ -82,6 +133,7 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         host: str,
         port: int,
         api_key: str,
+        device_id: str,
         auto_sensor_refresh: bool,
         sensor_refresh_interval: int,
     ) -> None:
@@ -90,6 +142,7 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         self.host = host
         self.port = port
         self.api_key = api_key
+        self.device_id = device_id
         self.base_url = f"http://{host}:{port}"
         self.status_data: dict = {}
         self.last_execution: dict = {
@@ -113,10 +166,42 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         )
 
     def _get_headers(self) -> dict:
-        """Get headers with API key if configured."""
-        if self.api_key:
-            return {"X-API-Key": self.api_key}
-        return {}
+        """Get API-key and stable trusted-device headers."""
+        return device_headers(self.hass, self.api_key, self.device_id)
+
+    async def _async_check_in(self) -> None:
+        """Confirm this Home Assistant instance is approved by the host."""
+        session = async_get_clientsession(self.hass)
+        async with async_timeout.timeout(10):
+            async with session.get(
+                f"{self.base_url}/api/device/check-in",
+                headers=self._get_headers(),
+            ) as response:
+                try:
+                    result = await response.json()
+                except (aiohttp.ContentTypeError, ValueError) as err:
+                    raise UpdateFailed("Invalid device check-in response") from err
+
+                status = result.get("status")
+                message = result.get("message") or "Device authorization failed"
+                if status == "approved":
+                    return
+                if status == "invalid_api_key" or response.status == 401:
+                    raise UpdateFailed(f"Invalid API key: {message}")
+                if status == "pending_approval":
+                    raise UpdateFailed(
+                        "Waiting for device approval in Command Runner on the Mac"
+                    )
+                if status == "rejected":
+                    raise UpdateFailed(
+                        "Home Assistant was rejected by the Command Runner host"
+                    )
+                if status == "removed":
+                    raise UpdateFailed(
+                        "Home Assistant was removed from the Command Runner host"
+                    )
+
+                raise UpdateFailed(message)
 
     async def _async_update_data(self):
         """Fetch command list and status data from API."""
@@ -125,6 +210,7 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         commands: list[dict] = []
 
         try:
+            await self._async_check_in()
             async with async_timeout.timeout(10):
                 async with session.get(
                     f"{self.base_url}/commands",
@@ -133,8 +219,9 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                     if response.status == 401:
                         raise UpdateFailed("Unauthorized: Invalid or missing API key")
                     if response.status == 403:
+                        result = await response.json()
                         raise UpdateFailed(
-                            "Forbidden: Server has no API keys configured"
+                            result.get("message", "Device is not approved by the host")
                         )
 
                     response.raise_for_status()
@@ -152,6 +239,8 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                     else:
                         raise UpdateFailed("Failed to fetch commands")
 
+        except UpdateFailed:
+            raise
         except aiohttp.ClientError as err:
             raise UpdateFailed(f"Error communicating with API: {err}") from err
         except Exception as err:
@@ -202,10 +291,10 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                         _LOGGER.error("Unauthorized: Invalid or missing API key")
                         result = {"success": False, "error": "Unauthorized"}
                     elif response.status == 403:
-                        _LOGGER.error(
-                            "Forbidden: Server has no API keys configured"
+                        result = await response.json()
+                        result.setdefault(
+                            "error", result.get("message", "Device is not approved")
                         )
-                        result = {"success": False, "error": "Forbidden"}
                     else:
                         response.raise_for_status()
                         result = await response.json()
@@ -269,10 +358,13 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
                         )
                         return {"success": False, "error": "Unauthorized"}
                     if response.status == 403:
-                        _LOGGER.error(
-                            "Forbidden: Server has no API keys configured for sensor"
-                        )
-                        return {"success": False, "error": "Forbidden"}
+                        result = await response.json()
+                        return {
+                            "success": False,
+                            "error": result.get(
+                                "message", "Device is not approved by the host"
+                            ),
+                        }
 
                     response.raise_for_status()
                     result = await response.json()
@@ -284,4 +376,3 @@ class CommandRunnerCoordinator(DataUpdateCoordinator):
         except Exception as err:
             _LOGGER.error("Unexpected error fetching sensor output: %s", err)
             return {"success": False, "error": str(err)}
-

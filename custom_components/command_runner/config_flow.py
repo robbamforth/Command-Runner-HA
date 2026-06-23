@@ -3,6 +3,7 @@
 import asyncio
 import logging
 from typing import Any
+from uuid import uuid4
 
 import aiohttp
 import async_timeout
@@ -16,9 +17,11 @@ from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
 from . import (
     CONF_AUTO_SENSOR_REFRESH,
+    CONF_DEVICE_ID,
     CONF_SENSOR_REFRESH_INTERVAL,
     DEFAULT_AUTO_SENSOR_REFRESH,
     DEFAULT_SENSOR_REFRESH_INTERVAL,
+    device_headers,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -55,33 +58,52 @@ def _build_config_schema(defaults: dict[str, Any]) -> vol.Schema:
     return vol.Schema(schema)
 
 
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
+async def validate_input(
+    hass: HomeAssistant,
+    data: dict[str, Any],
+    device_id: str,
+    *,
+    approval_request: bool = False,
+) -> dict[str, Any]:
     """Validate the user input allows us to connect."""
     host = data[CONF_HOST]
     port = data[CONF_PORT]
     api_key = data.get(CONF_API_KEY, "")
 
     session = async_get_clientsession(hass)
-    headers = {}
-    if api_key:
-        headers["X-API-Key"] = api_key
+    headers = device_headers(
+        hass,
+        api_key,
+        device_id,
+        approval_request=approval_request,
+    )
 
     try:
         async with async_timeout.timeout(10):
             async with session.get(
-                f"http://{host}:{port}/commands",
+                f"http://{host}:{port}/api/device/check-in",
                 headers=headers,
             ) as response:
-                if response.status == 401:
-                    raise InvalidAuth("Invalid API key")
-                if response.status == 403:
-                    raise NoAPIKeys("Server has no API keys configured")
-                response.raise_for_status()
                 result = await response.json()
-                if not result.get("success"):
-                    raise CannotConnect("Server responded but returned error")
+                status = result.get("status")
+                message = result.get("message", "Device authorization failed")
+                if status == "invalid_api_key" or response.status == 401:
+                    if "no api keys" in message.lower():
+                        raise NoAPIKeys(message)
+                    raise InvalidAuth(message)
+                if status not in {
+                    "approved",
+                    "pending_approval",
+                    "rejected",
+                    "removed",
+                }:
+                    response.raise_for_status()
+                    raise CannotConnect(message)
 
-                return {"title": f"Command Runner ({host})"}
+                return {
+                    "title": f"Command Runner ({host})",
+                    "device_status": status,
+                }
 
     except aiohttp.ClientError as err:
         raise CannotConnect("Cannot connect to Command Runner") from err
@@ -89,6 +111,8 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
         raise CannotConnect("Connection timed out") from err
     except asyncio.CancelledError as err:
         raise CannotConnect("Connection timed out") from err
+    except (InvalidAuth, NoAPIKeys, CannotConnect):
+        raise
     except Exception as err:
         _LOGGER.exception("Unexpected exception")
         raise CannotConnect(f"Unknown error: {err}") from err
@@ -97,7 +121,12 @@ async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str,
 class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for Command Runner."""
 
-    VERSION = 1
+    VERSION = 2
+
+    def __init__(self) -> None:
+        """Initialize the flow with one stable candidate device ID."""
+        super().__init__()
+        self._device_id = str(uuid4())
 
     @staticmethod
     @callback
@@ -123,7 +152,11 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             defaults.update(user_input)
             try:
-                info = await validate_input(self.hass, user_input)
+                info = await validate_input(
+                    self.hass,
+                    user_input,
+                    self._device_id,
+                )
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except NoAPIKeys:
@@ -142,6 +175,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_SENSOR_REFRESH_INTERVAL] = (
                         DEFAULT_SENSOR_REFRESH_INTERVAL
                     )
+
+                user_input[CONF_DEVICE_ID] = self._device_id
 
                 await self.async_set_unique_id(
                     f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
@@ -178,7 +213,13 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             defaults.update(user_input)
             try:
-                await validate_input(self.hass, user_input)
+                device_id = entry.data.get(CONF_DEVICE_ID) or str(uuid4())
+                await validate_input(
+                    self.hass,
+                    user_input,
+                    device_id,
+                    approval_request=True,
+                )
             except InvalidAuth:
                 errors["base"] = "invalid_auth"
             except NoAPIKeys:
@@ -197,6 +238,8 @@ class ConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     user_input[CONF_SENSOR_REFRESH_INTERVAL] = (
                         DEFAULT_SENSOR_REFRESH_INTERVAL
                     )
+
+                user_input[CONF_DEVICE_ID] = device_id
 
                 new_unique_id = f"{user_input[CONF_HOST]}:{user_input[CONF_PORT]}"
                 if new_unique_id != entry.unique_id:
